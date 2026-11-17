@@ -2,5 +2,5 @@
 binwalk	binwalk --help 2>&1 | grep -qi binwalk
 sleuthkit	fls -V 2>&1 | grep -qi 'sleuth kit'
 autopsy	test -f /usr/bin/autopsy || which autopsy
-volatility3	vol || vol.py --version 2>&1 | grep -qi volatility || test -f /usr/bin/vol
+volatility3	vol 2>&1 | grep -qi 'Volatility 3'
 bulk_extractor	bulk_extractor -V 2>&1 | grep -qi bulk_extractor || test -f /usr/bin/bulk_extractor
