@@ -1,0 +1,4 @@
+# secforge-recon — manifest de smoke test (L2)
+amass	amass -version 2>&1 | grep -qi amass
+whatweb	whatweb --version 2>&1 | grep -qi whatweb
+subfinder	subfinder -version 2>&1 | grep -qi subfinder

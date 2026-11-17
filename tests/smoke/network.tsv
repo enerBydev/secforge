@@ -1,0 +1,10 @@
+# secforge-network — manifest de smoke test (L2)
+masscan	masscan --version 2>&1 | grep -qi masscan
+rustscan	rustscan --version 2>&1 | grep -qi rustscan
+arp-scan	arp-scan --version 2>&1 | head -1 | grep -qi arp-scan
+dnsrecon	dnsrecon --version 2>&1 | grep -qi dnsrecon || python3 -c 'import dnsrecon' 2>/dev/null || test -f /usr/bin/dnsrecon
+hping	hping --version 2>&1 | head -1 | grep -qi hping || test -f /usr/bin/hping
+mtr	mtr --version 2>&1 | grep -qi mtr
+tcpflow	tcpflow --version 2>&1 | grep -qi tcpflow
+tshark	tshark --version 2>/dev/null | grep -qi tshark
+sslscan	sslscan --version 2>&1 | grep -qi sslscan

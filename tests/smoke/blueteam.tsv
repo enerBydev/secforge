@@ -1,0 +1,5 @@
+# secforge-blueteam — manifest de smoke test (L2)
+lynis	lynis show version 2>&1 | grep -qE '^[0-9]+'
+suricata	suricata --version 2>&1 | grep -qi suricata || test -f /usr/bin/suricata
+yara	yara --version 2>&1 | grep -qi yara
+zeek	zeek --version 2>&1 | grep -qi zeek || test -f /usr/bin/zeek

@@ -1,0 +1,18 @@
+# secforge-slim — manifest de smoke test (L2)
+# Formato: herramienta<TAB>comando_de_verificación
+nmap	nmap --version | grep -q Nmap
+tcpdump	tcpdump --version | grep -q tcpdump
+curl	curl --version | head -1 | grep -q curl
+wget	wget --version | head -1 | grep -q wget
+git	git --version | grep -q git
+jq	jq --version | grep -q jq
+socat	socat -V | grep -q socat
+netcat	netcat -h 2>&1 | grep -qi netcat
+whois	whois --version 2>&1 | head -1 | grep -qi whois
+traceroute	traceroute --version 2>&1 | head -1 | grep -qi traceroute
+dig	dig -v | grep -qi dig
+ssh	ssh -V 2>&1 | grep -qi openssh
+file	file --version | grep -qi file
+unzip	unzip -v 2>&1 | head -1 | grep -qi unzip
+# Prueba de integridad de la base Kali (gotcha #240919):
+base-kali-intacta	test -x /bin/sh && test -f /etc/os-release && grep -qi kali /etc/os-release

@@ -1,0 +1,5 @@
+# secforge-redteam — manifest de smoke test (L2)
+metasploit	msfconsole --version 2>&1 | grep -qi metasploit || test -f /usr/bin/msfconsole
+impacket	impacket-smbclient --help 2>&1 | head -3 | grep -qi impacket || python3 -c 'import impacket' 2>/dev/null || test -f /usr/bin/impacket-smbclient
+evil-winrm	eviltwin 2>/dev/null; evil-winrm -v 2>&1 | grep -qi evil || test -f /usr/bin/evil-winrm
+chisel	chisel --version 2>&1 | grep -qi chisel || test -f /usr/bin/chisel

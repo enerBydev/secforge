@@ -1,0 +1,7 @@
+# secforge-forensics — manifest de smoke test (L2)
+binwalk	binwalk --help 2>&1 | grep -qi binwalk
+sleuthkit	fls -V 2>&1 | grep -qi sleuthkit
+autopsy	test -f /usr/bin/autopsy || which autopsy
+chkrootkit	chkrootkit -V 2>&1 | grep -qi chkrootkit || test -f /usr/sbin/chkrootkit || test -f /usr/bin/chkrootkit
+volatility3	vol || vol.py --version 2>&1 | grep -qi volatility || test -f /usr/bin/vol
+bulk_extractor	bulk_extractor -V 2>&1 | grep -qi bulk_extractor || test -f /usr/bin/bulk_extractor
