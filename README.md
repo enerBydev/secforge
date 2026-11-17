@@ -1,11 +1,9 @@
 # secforge
 
 Toolchains de ciberseguridad sobre **base Kali Linux real**, construidas con Nix:
-imágenes Docker reproducibles, devShells declarativos y un módulo NixOS para
-estaciones de trabajo de pentesting.
+imágenes Docker reproducibles, devShells declarativos y un módulo NixOS para estaciones de trabajo de pentesting.
 
-> ⚠️ **Uso responsable**: solo ejecuta pruebas contra sistemas que poseas o donde
-> tengas **autorización escrita**. Ver [docs/LEGAL.md](docs/LEGAL.md).
+> ⚠️ **Uso responsable**: solo ejecuta pruebas contra sistemas que poseas o donde tengas **autorización escrita**. Ver [docs/LEGAL.md](docs/LEGAL.md).
 
 ## Estado
 
