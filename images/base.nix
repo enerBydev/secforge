@@ -8,13 +8,12 @@
 # si el build falla con "invalid hash", copiar el hash EXACTO que Nix sugiere
 # en el mensaje de error (ver docs/TROUBLESHOOTING.md).
 #
-# Estado actual: PLACEHOLDER — el primer build fallará por diseño hasta que
-# se peguen los valores reales (flujo de bootstrap documentado en README).
+# Estado: anclado al snapshot semanal del 2026-11-16 (digest 1ff4a2be...).
 { pkgs }:
 pkgs.dockerTools.pullImage {
   imageName = "kalilinux/kali-rolling";
-  imageDigest = "sha256:BOOTSTRAP_DIGEST_REEMPLAZAR";
-  sha256 = "sha256-BOOTSTRAP_HASH_REEMPLAZAR";
+  imageDigest = "sha256:1ff4a2be3849333687b3ed2b31bb5af0cd1b7c0a11ec7713feb5abe5a6b2795c";
+  sha256 = "sha256-HvSq5CEsW0iNwyL4cSWJ3iQ6xDTZ/z36Bdq31zDavfY=";
   finalImageName = "kali";
   finalImageTag = "pinned";
 }

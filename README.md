@@ -10,8 +10,8 @@ estaciones de trabajo de pentesting.
 ## Estado
 
 - [x] Esqueleto del repo, presets, imágenes, tests, CI/CD definidos
-- [ ] **Bootstrap del digest de Kali** (Fase 3): `images/base.nix` contiene
-  placeholders hasta ejecutar `nix-prefetch-docker` (ver abajo)
+- [x] Bootstrap del digest de Kali (anclado al snapshot del 2026-11-16)
+- [x] L0 en verde: `nix flake check` + statix + deadnix + nixfmt
 - [ ] Primer build verde + smoke
 
 ## Imágenes producidas

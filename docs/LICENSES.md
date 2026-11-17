@@ -7,6 +7,8 @@ No se usa `allowUnfree = true` global: cada paquete unfree debe justificarse aqu
 |---|---|---|---|
 | burpsuite | Propietaria (PortSwigger) | Estándar de facto en auditoría web; uso interno de auditoría | 2026-11 |
 | maltego | Propietaria (MaliTech) | OSINT; uso comunitario/free edition | 2026-11 |
+| wpscan | Propietaria (WPScan) | Escáner WordPress; licencia comercial restringe uso empresarial | 2026-11 |
+| volatility3 | Volatility Foundation (restringe uso comercial) | Forense de memoria; permitido para auditoría interna no comercial | 2026-11 |
 
 Procedimiento para añadir uno nuevo:
 1. Verificar que la licencia permite el uso previsto en tu organización.

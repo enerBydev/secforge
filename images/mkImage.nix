@@ -11,7 +11,6 @@
 #   de Kali.
 {
   pkgs,
-  lib,
   kaliBase,
   name,
   presetPaths,
@@ -37,6 +36,7 @@ pkgs.dockerTools.buildImage {
     Cmd = [ "/bin/bash" ];
     Env = [
       "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-    ] ++ extraEnv;
+    ]
+    ++ extraEnv;
   };
 }

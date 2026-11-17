@@ -77,7 +77,7 @@ Leyenda de `origen`:
 | binwalk | nixpkgs ✅ | verificado (3.1.0) |
 | sleuthkit | nixpkgs ✅ | verificado (4.12.1) |
 | autopsy | nixpkgs ✅ | verificado (4.21.0) |
-| chkrootkit | nixpkgs ✅ | verificado (0.58b) |
+| chkrootkit | apt-runtime 🔧 | ELIMINADO de nixpkgs (unmaintained upstream); sigue en repos Kali |
 | volatility3 | nixpkgs ⚠️ | validar en primer build |
 | bulk_extractor | nixpkgs ✅ | verificado (2.1.1) |
 
