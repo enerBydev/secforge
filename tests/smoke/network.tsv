@@ -7,4 +7,4 @@ hping	hping --version 2>&1 | head -1 | grep -qi hping || test -f /usr/bin/hping
 mtr	mtr --version 2>&1 | grep -qi mtr
 tcpflow	tcpflow --version 2>&1 | grep -qi tcpflow
 tshark	tshark --version 2>/dev/null | grep -qi tshark
-sslscan	sslscan --version 2>&1 | grep -qi sslscan
+sslscan	sslscan --version 2>&1 | grep -qE '^[0-9]+\.'
