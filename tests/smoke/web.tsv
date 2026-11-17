@@ -7,5 +7,5 @@ wpscan	wpscan --version 2>&1 | grep -qi 'Current Version:'
 mitmproxy	mitmproxy --version 2>&1 | grep -qi mitmproxy
 gobuster	gobuster --version 2>&1 | grep -qi gobuster
 wfuzz	wfuzz --help 2>&1 | grep -qi wfuzz
-commix	commix --version 2>&1 | grep -qi commix || test -f /usr/bin/commix
+commix	commix --version 2>&1 | grep -qE '^v?[0-9]+\.[0-9]'
 burpsuite	test -f /usr/bin/burpsuite || which burpsuite
