@@ -3,12 +3,12 @@
 nmap	nmap --version | grep -q Nmap
 tcpdump	tcpdump --version | grep -q tcpdump
 curl	curl --version | head -1 | grep -q curl
-wget	wget --version | head -1 | grep -q wget
+wget	wget --version | head -1 | grep -qi 'GNU Wget'
 git	git --version | grep -q git
 jq	jq --version | grep -q jq
 socat	socat -V | grep -q socat
 netcat	netcat -h 2>&1 | grep -qi netcat
-whois	whois --version 2>&1 | head -1 | grep -qi whois
+whois	whois --version 2>&1 | head -1 | grep -qE '^Version [0-9]'
 traceroute	traceroute --version 2>&1 | head -1 | grep -qi traceroute
 dig	dig -v | grep -qi dig
 ssh	ssh -V 2>&1 | grep -qi openssh

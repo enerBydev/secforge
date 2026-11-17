@@ -15,7 +15,12 @@ Si un bug nuevo encaja con un patrón, actualizar esta tabla; si no, issue con r
 - **Causa**: sobre una base Debian usr-merged (`/bin` es un symlink a `/usr/bin`),
   `copyToRoot` sin prefijo crea un `/bin` real que "empaña" las capas inferiores
   → toda la base deja de funcionar. nixpkgs issue #240919.
-- **Solución**: `extraPrefix = "/usr"` en `buildEnv` (ya aplicado en `images/mkImage.nix`).
+- **Solución (ACTUALIZADA)**: migrado de `buildImage` a `buildLayeredImage`
+  (ver #5). Las herramientas ya NO se colocan en `/usr/bin`: viven solo en
+  `/nix/store` y se exponen vía PATH (`${tools}/bin` primero en `config.Env`).
+  `fakeRootCommands` restaura `bin → /usr/bin` dentro del propio layer porque
+  el `symlinkJoin` interno de `buildLayeredImage` crea un `bin/` real en la
+  raíz del layer (lndir) que taparía el usrmerge de nuevo.
 - **Síntoma de regresión**: en smoke, el check `base-kali-intacta` falla.
 
 ## 3. apt durante el build de Nix
@@ -52,3 +57,34 @@ Si un bug nuevo encaja con un patrón, actualizar esta tabla; si no, issue con r
 - **Causa**: kali-rolling es rolling; el snapshot semanal puede traer regresiones.
 - **Solución**: rollback del digest (git revert del PR de digest-update) y reportar
   upstream. El nightly detecta esto automáticamente.
+
+## 9. `buildImage` produce capas grandes con diffID inválido (no determinista)
+
+- **Síntoma**: `docker load` falla con `invalid diffID for layer 1: expected
+  "sha256:X", got "sha256:Y"` y Y CAMBIA entre rebuilds del mismo drv. En un
+  build el .tar.gz incluso salió con CRC de gzip corrupto. Reproducido con el
+  preset redteam (layer de ~2 GB con metasploit); las 7 imágenes pequeñas
+  nunca fallaron.
+- **Diagnóstico en vivo**: el `layer.tar` interno tenía un byte de cabecera
+  inválido al final del stream y su SHA256 real ≠ diff_id registrado en el
+  config; `nix build --rebuild` re-escribió el MISMO path de store con bytes
+  distintos.
+- **Causa**: `dockerTools.buildImage` es el builder legacy; el empaquetado de
+  capas grandes no es fiable (no determinista). La propia doc de nixpkgs
+  recomienda `buildLayeredImage`/`streamLayeredImage` para casos serios.
+- **Solución**: migrado a `buildLayeredImage` (soporta `fromImage` desde PR
+  nixpkgs #115857; tar con `--sort name`; diffIDs calculados del stream real).
+  Aplicado en `images/mkImage.nix`; TODAS las imágenes se reconstruyen tras
+  el cambio.
+
+## 10. `buildLayeredImage` también tapa el usrmerge (variante del #2)
+
+- **Causa**: internamente hace `symlinkJoin { paths = contents; }` con `lndir`:
+  los top-level de cada path de `contents` (p.ej. `bin/` de un buildEnv)
+  acaban como directorios REALES en la raíz del layer. Un `bin/` real tapa el
+  symlink `/bin → /usr/bin` de la base → `/bin/sh` desaparece.
+- **Gotcha doble**: `fakeRootCommands` corre con `cd old_out` — las rutas
+  ABSOLUTAS (`rm /bin`) apuntan al sandbox, no al layer (y `bash -e` no
+  aborta, falla en silencio).
+- **Solución**: rutas RELATIVAS en `fakeRootCommands`:
+  `rm -rf bin && ln -s /usr/bin bin`.
