@@ -33,6 +33,11 @@ in
 pkgs.dockerTools.buildLayeredImage {
   inherit name tag;
   fromImage = kaliBase;
+  # maxLayers=3: base(1) + customisation(1) + 1 capa de store. El split por
+  # popularidad (dockerAutoLayer) es NO determinista (itera sets de strings →
+  # la partición varía por build: 98 vs 100 capas medidas). Con un solo slot
+  # para contents el particionado es trivial y el tar es byte-reproducible (L4).
+  maxLayers = 3;
   contents = [ tools ];
   # GOTCHA (docs/TROUBLESHOOTING.md #5): buildLayeredImage fusiona `contents`
   # en la raíz del layer vía symlinkJoin → crea un /bin REAL que tapa el
