@@ -1,4 +1,4 @@
 # secforge-recon — manifest de smoke test (L2)
-amass	amass -version 2>&1 | grep -qi amass
+amass	amass -version 2>&1 | grep -qE '^v?[0-9]+\.[0-9]'
 whatweb	whatweb --version 2>&1 | grep -qi whatweb
 subfinder	subfinder -version 2>&1 | grep -qi subfinder
