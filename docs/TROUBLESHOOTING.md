@@ -58,24 +58,27 @@ Si un bug nuevo encaja con un patrón, actualizar esta tabla; si no, issue con r
 - **Solución**: rollback del digest (git revert del PR de digest-update) y reportar
   upstream. El nightly detecta esto automáticamente.
 
-## 9. `buildImage` produce capas grandes con diffID inválido (no determinista)
+## 9. Capas con diffID inválido / CRC corrupto — ⚠️ RE-ATRIBUIDO A HARDWARE
 
-- **Síntoma**: `docker load` falla con `invalid diffID for layer 1: expected
-  "sha256:X", got "sha256:Y"` y Y CAMBIA entre rebuilds del mismo drv. En un
-  build el .tar.gz incluso salió con CRC de gzip corrupto. Reproducido con el
-  preset redteam (layer de ~2 GB con metasploit); las 7 imágenes pequeñas
-  nunca fallaron.
-- **Diagnóstico en vivo**: el `layer.tar` interno tenía un byte de cabecera
-  inválido al final del stream y su SHA256 real ≠ diff_id registrado en el
-  config; `nix build --rebuild` re-escribió el MISMO path de store con bytes
-  distintos.
-- **Causa**: `dockerTools.buildImage` es el builder legacy; el empaquetado de
-  capas grandes no es fiable (no determinista). La propia doc de nixpkgs
-  recomienda `buildLayeredImage`/`streamLayeredImage` para casos serios.
-- **Solución**: migrado a `buildLayeredImage` (soporta `fromImage` desde PR
-  nixpkgs #115857; tar con `--sort name`; diffIDs calculados del stream real).
-  Aplicado en `images/mkImage.nix`; TODAS las imágenes se reconstruyen tras
-  el cambio.
+- **Síntoma acumulado**: `docker load` falla con `invalid diffID` o `invalid
+  tar header` y el digest "got" CAMBIA entre intentos; `gzip -t` del MISMO
+  archivo de store pasa y falla en momentos distintos; `nix build --rebuild`
+  re-escribió el mismo drv con bytes distintos; una copia simple de 2 GB
+  (`cp` + `cmp`) difirió en el byte 101.987.473; un .tar.gz verificado
+  byte-a-byte capa por capa dio "invalid compressed data--crc" minutos
+  después al releerlo.
+- **Diagnóstico CORRECTO**: inestabilidad de hardware de la máquina host
+  (RAM marginal o disco con sectores en decadencia). La corrupción afecta a
+  escrituras/lecturas grandes bajo presión de memoria — NO es un bug de
+  dockerTools ni de secforge.
+- **Historia**: la migración `buildImage` → `buildLayeredImage` se hizo bajo
+  la hipótesis (refutada) de builder no determinista. La migración se CONSERVA
+  porque `buildLayeredImage` es el builder mantenido, con tar `--sort name` y
+  diffIDs del stream real, y porque permitió el fix del usrmerge (#10).
+- **Implicación operativa**: NINGÚN build puede declararse verde sin
+  doble verificación de hash (build → sha256 → releer → sha256 igual) hasta
+  que la máquina pase memtest86+ y SMART. El test L4 (reproducibilidad por
+  hash idéntico) queda BLOQUEADO a ese veredicto.
 
 ## 10. `buildLayeredImage` también tapa el usrmerge (variante del #2)
 
