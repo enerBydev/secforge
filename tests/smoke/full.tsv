@@ -1,0 +1,56 @@
+amass	amass -version 2>&1 | grep -qE '^v?[0-9]+\.[0-9]'
+arp-scan	arp-scan --version 2>&1 | head -1 | grep -qi arp-scan
+autopsy	test -f /usr/bin/autopsy || which autopsy
+base-kali-intacta	test -x /bin/sh && test -f /etc/os-release && grep -qi kali /etc/os-release
+binwalk	binwalk --help 2>&1 | grep -qi binwalk
+bulk_extractor	bulk_extractor -V 2>&1 | grep -qi bulk_extractor || test -f /usr/bin/bulk_extractor
+burpsuite	test -f /usr/bin/burpsuite || which burpsuite
+chisel	chisel --version 2>&1 | grep -qE '^[0-9]+\.[0-9]'
+commix	commix --version 2>&1 | grep -qE '^v?[0-9]+\.[0-9]'
+crunch	crunch --version 2>&1 | grep -qi crunch || test -f /usr/bin/crunch
+curl	curl --version | head -1 | grep -q curl
+dig	dig -v | grep -qi dig
+dirb	dirb -h 2>&1 | head -3 | grep -qi dirb || test -f /usr/bin/dirb
+dnsrecon	dnsrecon --version 2>&1 | grep -qi dnsrecon || python3 -c 'import dnsrecon' 2>/dev/null || test -f /usr/bin/dnsrecon
+evil-winrm	eviltwin 2>/dev/null; evil-winrm -v 2>&1 | grep -v warning | grep -qE '^v?[0-9]+\.[0-9]'
+fcrackzip	fcrackzip --version 2>&1 | grep -qi fcrackzip || test -f /usr/bin/fcrackzip
+ffuf	ffuf -V 2>&1 | grep -qi ffuf
+file	file --version | grep -qi file
+git	git --version | grep -q git
+gobuster	gobuster --version 2>&1 | grep -qi gobuster
+hashcat	hashcat --version 2>&1 | grep -qE '^[0-9]+\.[0-9]'
+hping	hping --version 2>&1 | head -1 | grep -qi hping || test -f /usr/bin/hping
+hydra	hydra -V 2>&1 | head -1 | grep -qi hydra
+impacket	python3 -c 'import impacket' && (impacket-smbclient --help 2>/dev/null | head -1; secretsdump.py --version 2>/dev/null; true)
+john	john --version 2>&1 | grep -qi john
+jq	jq --version | grep -q jq
+lynis	lynis show version 2>&1 | grep -qE '^[0-9]+'
+masscan	masscan --version 2>&1 | grep -qi masscan
+medusa	medusa -V 2>&1 | head -1 | grep -qi medusa
+metasploit	msfconsole --version 2>&1 | grep -qi 'Framework Version'
+mitmproxy	mitmproxy --version 2>&1 | grep -qi mitmproxy
+mtr	mtr --version 2>&1 | grep -qi mtr
+netcat	netcat -h 2>&1 | grep -qi netcat
+nikto	nikto -Version 2>&1 | grep -qi nikto
+nmap	nmap --version | grep -q Nmap
+rustscan	rustscan --version 2>&1 | grep -qi rustscan
+sleuthkit	fls -V 2>&1 | grep -qi 'sleuth kit'
+socat	socat -V | grep -q socat
+sqlmap	sqlmap --version 2>&1 | grep -qE '^[0-9]+\.[0-9]'
+ssh	ssh -V 2>&1 | grep -qi openssh
+sslscan	sslscan --version 2>&1 | grep -qE '^[0-9]+\.'
+subfinder	subfinder -version 2>&1 | grep -qi subfinder
+suricata	suricata --version 2>&1 | grep -qi suricata || test -f /usr/bin/suricata
+tcpdump	tcpdump --version | grep -q tcpdump
+tcpflow	tcpflow --version 2>&1 | grep -qi tcpflow
+traceroute	traceroute --version 2>&1 | head -1 | grep -qi traceroute
+tshark	tshark --version 2>/dev/null | grep -qi tshark
+unzip	unzip -v 2>&1 | head -1 | grep -qi unzip
+volatility3	vol 2>&1 | grep -qi 'Volatility 3'
+wfuzz	wfuzz --help 2>&1 | grep -qi wfuzz
+wget	wget --version | head -1 | grep -qi 'GNU Wget'
+whatweb	whatweb --version 2>&1 | grep -qi whatweb
+whois	whois --version 2>&1 | head -1 | grep -qE '^Version [0-9]'
+wpscan	wpscan --version 2>&1 | grep -qi 'Current Version:'
+yara	yara --version 2>&1 | grep -qE '^[0-9]+\.[0-9]'
+zeek	zeek --version 2>&1 | grep -qi zeek || test -f /usr/bin/zeek
