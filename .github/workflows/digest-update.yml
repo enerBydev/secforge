@@ -7,6 +7,12 @@ on:
   schedule:
     - cron: '0 5 * * 1' # lunes 05:00 UTC
   workflow_dispatch:
+    inputs:
+      image-tag:
+        description: 'Tag de kalilinux/kali-rolling a anclar'
+        required: false
+        default: latest
+        type: string
 
 permissions:
   contents: write
@@ -22,9 +28,11 @@ jobs:
       - name: Obtener digest y hash actuales de kali-rolling
         id: bump
         run: |
+          TAG="${{ inputs.image-tag || 'latest' }}"
+          echo "tag upstream: $TAG"
           nix run nixpkgs#nix-prefetch-docker -- \
             --image-name kalilinux/kali-rolling \
-            --image-tag latest --arch amd64 --os linux | tee prefetch.txt
+            --image-tag "$TAG" --arch amd64 --os linux | tee prefetch.txt
           # Formato actual (nix-prefetch-docker reciente):
           #   -> ImageDigest: sha256:...
           #   -> ImageHash: sha256-...
@@ -49,10 +57,21 @@ jobs:
             echo "Kali actualizado a $DIGEST" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      # Gotcha conocido: el hash de prefetch a veces es erróneo → validar con build real.
+      # Gotcha conocido: el hash de nix-prefetch-docker puede no coincidir con el
+      # que espera dockerTools.pullImage (tarball distinto según versión de skopeo).
+      # Si el build falla por hash mismatch, usar el "got:" que Nix calculó y reintentar.
       - name: Validar que la imagen base sigue construyendo
         if: steps.bump.outputs.changed == 'true'
-        run: nix build .#kali-slim
+        run: |
+          if ! nix build .#kali-slim 2>build.err; then
+            GOT="$(grep -oP 'got:\s+\Ksha256-[A-Za-z0-9+/=]+' build.err | head -1 || true)"
+            if [[ -z "$GOT" ]]; then
+              echo "ROJO: build falló y no se pudo extraer el hash esperado"; cat build.err; exit 1
+            fi
+            echo "Hash de prefetch incorrecto; usando el calculado por Nix: $GOT"
+            sed -i "s|sha256 = \".*\"|sha256 = \"${GOT}\"|" images/base.nix
+            nix build .#kali-slim
+          fi
 
       - name: Crear PR
         id: pr
