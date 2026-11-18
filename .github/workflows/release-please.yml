@@ -41,17 +41,20 @@ jobs:
           manifest-file: .github/release-please-manifest.json
 
       # El PR de release lo crea GITHUB_TOKEN → GitHub RETIENE su run de CI
-      # (conclusion=action_required). Se resuelve sin PAT: (1) aprobar el run por
-      # API (actions: write) para que los checks L0 y L1+L2 se reporten,
-      # (2) activar auto-merge. El merge lo hace GitHub —no el token— así que
-      # sí dispara el push a main → release-please crea el tag vX.Y.Z.
-      - name: Aprobar el CI retenido del PR de release y activar auto-merge
+      # (conclusion=action_required) y los checks requeridos (L0, L1+L2) nunca se
+      # reportan → el PR queda BLOCKED. Se resuelve sin PAT:
+      #   1) Aprobar el run por API (actions: write) para que L0 y L1+L2 pasen.
+      #   2) Esperar a que el CI esté verde.
+      #   3) Mergear con GITHUB_TOKEN (gh pr merge --squash) → SÍ dispara push
+      #      a main → release-please se ejecuta de nuevo → crea el tag vX.Y.Z.
+      #      (El auto-merge de GitHub NO dispara workflows; mergear con token SÍ).
+      - name: Aprobar CI retenido, esperar verde y mergear (token → push → tag)
         run: |
           BRANCH="release-please--branches--main"
           PR="$(gh pr list --state open --head "$BRANCH" \
             --json number --jq '.[0].number // empty')"
           if [[ -z "$PR" ]]; then
-            echo "No hay PR de release abierto: nada que aprobar"
+            echo "No hay PR de release abierto: nada que hacer"
             exit 0
           fi
           HEAD_SHA="$(gh pr view "$PR" --json headRefOid --jq .headRefOid)"
@@ -86,11 +89,15 @@ jobs:
             sleep 2
           done
 
-          # Auto-merge: lo ejecuta GitHub, no el token → el push a main dispara
-          # los workflows (un merge hecho con GITHUB_TOKEN NO los dispararía).
-          gh pr merge "$PR" --auto --squash
-          echo "Auto-merge activado en el PR #$PR (se fusionará con el CI en verde)" \
-            >> "$GITHUB_STEP_SUMMARY"
+          # Esperar a que el CI termine (ya aprobado, pasará a completed/success).
+          echo "Esperando a que el CI termine..."
+          gh run watch "$RUN_ID" --exit-status --interval 20
+
+          # Mergear CON EL TOKEN (no auto-merge): el push a main dispara
+          # release-please → crea el tag vX.Y.Z → lo despachamos aquí mismo.
+          echo "Mergeando el PR #$PR con GITHUB_TOKEN (dispara push)..."
+          gh pr merge "$PR" --squash
+          echo "PR #$PR mergeado; release-please se disparará por push a main"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
