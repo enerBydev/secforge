@@ -91,3 +91,37 @@ Si un bug nuevo encaja con un patrón, actualizar esta tabla; si no, issue con r
   aborta, falla en silencio).
 - **Solución**: rutas RELATIVAS en `fakeRootCommands`:
   `rm -rf bin && ln -s /usr/bin bin`.
+
+## 11. `docker load` sale con código 0 pese a fallar + confirmación del #9
+
+- **Síntoma 1 (trampa)**: tras reescribir el historial, `kali-web` cargó con
+  `Loaded image: secforge-web:nix` PERO a continuación
+  `Error unpacking image: ... wrong diff id calculated on extraction` — y el
+  exit code fue **0**. Un `docker load < result && echo OK` imprime "OK" con
+  la imagen rota. Verificación válida = ejecutar un contenedor (el smoke lo
+  hace); NUNCA confiar en el exit code de `docker load`.
+- **Síntoma 2 (aislamiento)**: el tar en el store estaba PERFECTO —
+  verificación userspace (`tar -xOzf result <capa> | sha256sum` contra los
+  `diff_ids` del config): 3/3 capas idénticas (126 MB, 2.85 GB, 10 KB). Dos
+  `docker load` del MISMO fichero calcularon hashes erróneos DISTINTOS entre
+  sí (`9c3f11e4...`, `9f90c4ff...`) y distintos de los reales.
+- **Diagnóstico**: la corrupción ocurre EN VUELO, en memoria (ruta
+  descompresión→hashing→extracción de docker), de forma no determinista.
+  El fichero en disco es correcto → **RAM (o CPU) defectuosa, no disco**.
+  SMART del NVMe (WD Green SN350 500GB): 0 Media/Data Integrity Errors,
+  Available Spare 100% — disco descartado como causa primaria (con 50% de
+  desgaste y 290 unsafe shutdowns anotados como contexto).
+- **Implicación operativa**: pipeline de builds EN PAUSA hasta veredicto de
+  memoria (memtester en userspace + pasada completa de memtest86+). Reintentar
+  `docker load` hasta que salga NO es una solución: una imagen cargada sobre
+  RAM inestable puede tener bytes corruptos en /var/lib/docker sin error
+  aparente. Tampoco puede confiarse en ningún hash verificado en esta máquina
+  hasta reparación (reseat/cambio de módulo o bajada de frecuencia en BIOS).
+- **Veredicto parcial (memtester userspace)**: `memtester 5G 1` —
+  **0 FAILURE, 16/16 patrones ok**. Señal positiva pero NO conclusiva: el test
+  corre bajo el kernel cargado y no alcanza toda la RAM (páginas reservadas,
+  kernel, regiones que memtester no consigue alojar). La pasada definitiva es
+  memtest86+ desde USB/GRUB con reinicio. Mientras tanto, trabajar con doble
+  verificación (sha256 del tar → releer → sha256, y smoke obligatorio tras
+  cada `docker load`) y tratar todo hash local como no verificado hasta
+  memtest86+.
