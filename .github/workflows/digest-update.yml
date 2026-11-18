@@ -32,17 +32,18 @@ jobs:
           echo "tag upstream: $TAG"
           nix run nixpkgs#nix-prefetch-docker -- \
             --image-name kalilinux/kali-rolling \
-            --image-tag "$TAG" --arch amd64 --os linux | tee prefetch.txt
+            --image-tag "$TAG" --arch amd64 --os linux | tee "$RUNNER_TEMP/prefetch.txt"
+          PREFETCH="$RUNNER_TEMP/prefetch.txt"
           # Formato actual (nix-prefetch-docker reciente):
           #   -> ImageDigest: sha256:...
           #   -> ImageHash: sha256-...
           # Fallbacks: formatos antiguos y el attrset que imprime al final.
-          DIGEST="$(grep -oPm1 'ImageDigest: \K.*' prefetch.txt || true)"
-          HASH="$(grep -oPm1 'ImageHash: \K.*' prefetch.txt || true)"
-          [[ -n "$DIGEST" ]] || DIGEST="$(grep -oPm1 'imageDigest = "\K[^"]+' prefetch.txt || true)"
-          [[ -n "$HASH" ]] || HASH="$(grep -oPm1 '\bhash = "\K[^"]+' prefetch.txt || true)"
+          DIGEST="$(grep -oPm1 'ImageDigest: \K.*' "$PREFETCH" || true)"
+          HASH="$(grep -oPm1 'ImageHash: \K.*' "$PREFETCH" || true)"
+          [[ -n "$DIGEST" ]] || DIGEST="$(grep -oPm1 'imageDigest = "\K[^"]+' "$PREFETCH" || true)"
+          [[ -n "$HASH" ]] || HASH="$(grep -oPm1 '\bhash = "\K[^"]+' "$PREFETCH" || true)"
           [[ -n "$DIGEST" && -n "$HASH" ]] || {
-            echo "ROJO: parseo de nix-prefetch-docker falló"; cat prefetch.txt; exit 2;
+            echo "ROJO: parseo de nix-prefetch-docker falló"; cat "$PREFETCH"; exit 2;
           }
           CURRENT="$(grep -oPm1 'imageDigest = "\K[^"]+' images/base.nix || true)"
           echo "digest actual  : $CURRENT"
@@ -60,13 +61,16 @@ jobs:
       # Gotcha conocido: el hash de nix-prefetch-docker puede no coincidir con el
       # que espera dockerTools.pullImage (tarball distinto según versión de skopeo).
       # Si el build falla por hash mismatch, usar el "got:" que Nix calculó y reintentar.
+      # OJO: el log va FUERA del repo ($RUNNER_TEMP) — si cae en el workspace,
+      # create-pull-request lo commitea dentro del PR (sucio).
       - name: Validar que la imagen base sigue construyendo
         if: steps.bump.outputs.changed == 'true'
         run: |
-          if ! nix build .#kali-slim 2>build.err; then
-            GOT="$(grep -oP 'got:\s+\Ksha256-[A-Za-z0-9+/=]+' build.err | head -1 || true)"
+          LOG="$RUNNER_TEMP/build.err"
+          if ! nix build .#kali-slim 2>"$LOG"; then
+            GOT="$(grep -oP 'got:\s+\Ksha256-[A-Za-z0-9+/=]+' "$LOG" | head -1 || true)"
             if [[ -z "$GOT" ]]; then
-              echo "ROJO: build falló y no se pudo extraer el hash esperado"; cat build.err; exit 1
+              echo "ROJO: build falló y no se pudo extraer el hash esperado"; cat "$LOG"; exit 1
             fi
             echo "Hash de prefetch incorrecto; usando el calculado por Nix: $GOT"
             sed -i "s|sha256 = \".*\"|sha256 = \"${GOT}\"|" images/base.nix

@@ -7,3 +7,7 @@
 
 # Editor
 .obsidian/
+
+# Logs/artefactos temporales de los workflows (no deben entrar en un PR)
+/build.err
+/prefetch.txt
