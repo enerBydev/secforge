@@ -5,6 +5,11 @@ name: _probe-ref
 
 on:
   workflow_dispatch:
+    inputs:
+      test:
+        description: 'valor de prueba'
+        required: false
+        default: 'vacio'
 
 permissions:
   contents: read
