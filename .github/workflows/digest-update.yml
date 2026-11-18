@@ -20,21 +20,43 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
       - name: Obtener digest y hash actuales de kali-rolling
+        id: bump
         run: |
           nix run nixpkgs#nix-prefetch-docker -- \
             --image-name kalilinux/kali-rolling \
-            --image-tag latest --arch amd64 --os linux > prefetch.txt
-          cat prefetch.txt
-          DIGEST="$(grep -oP 'Image digest: \K.*' prefetch.txt)"
-          HASH="$(grep -oP 'Image digest \(sha256\): \K.*' prefetch.txt)"
-          test -n "$DIGEST" && test -n "$HASH" || { echo "Parseo falló"; exit 2; }
-          sed -i "s|imageDigest = \"sha256:.*\"|imageDigest = \"${DIGEST}\"|" images/base.nix
-          sed -i "s|sha256 = \".*\"|sha256 = \"${HASH}\"|" images/base.nix
-          # Gotcha conocido: el hash de prefetch a veces es erróneo → validar con build real
+            --image-tag latest --arch amd64 --os linux | tee prefetch.txt
+          # Formato actual (nix-prefetch-docker reciente):
+          #   -> ImageDigest: sha256:...
+          #   -> ImageHash: sha256-...
+          # Fallbacks: formatos antiguos y el attrset que imprime al final.
+          DIGEST="$(grep -oPm1 'ImageDigest: \K.*' prefetch.txt || true)"
+          HASH="$(grep -oPm1 'ImageHash: \K.*' prefetch.txt || true)"
+          [[ -n "$DIGEST" ]] || DIGEST="$(grep -oPm1 'imageDigest = "\K[^"]+' prefetch.txt || true)"
+          [[ -n "$HASH" ]] || HASH="$(grep -oPm1 '\bhash = "\K[^"]+' prefetch.txt || true)"
+          [[ -n "$DIGEST" && -n "$HASH" ]] || {
+            echo "ROJO: parseo de nix-prefetch-docker falló"; cat prefetch.txt; exit 2;
+          }
+          CURRENT="$(grep -oPm1 'imageDigest = "\K[^"]+' images/base.nix || true)"
+          echo "digest actual  : $CURRENT"
+          echo "digest upstream: $DIGEST"
+          if [[ "$DIGEST" = "$CURRENT" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Kali sin cambios ($DIGEST): no se crea PR" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            sed -i "s|imageDigest = \"sha256:.*\"|imageDigest = \"${DIGEST}\"|" images/base.nix
+            sed -i "s|sha256 = \".*\"|sha256 = \"${HASH}\"|" images/base.nix
+            echo "Kali actualizado a $DIGEST" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Gotcha conocido: el hash de prefetch a veces es erróneo → validar con build real.
       - name: Validar que la imagen base sigue construyendo
+        if: steps.bump.outputs.changed == 'true'
         run: nix build .#kali-slim
+
       - name: Crear PR
         id: pr
+        if: steps.bump.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@3ffccacd46053766916f087ce41d627c0b8cf2d1 # v8.1.3
         with:
           commit-message: 'chore(kali): bump snapshot digest'
@@ -42,9 +64,10 @@ jobs:
           body: |
             Actualización automática del digest de `kalilinux/kali-rolling`.
             - El build de `kali-slim` ya fue validado en este PR (verde antes del merge).
-            - Si el CI falla, el auto-merge no procederá.
+            - Si el CI falla, el merge no procederá.
           branch: chore/kali-digest-bump
           delete-branch: true
+
       # Un PR creado con GITHUB_TOKEN no dispara pull_request (recursión), así que
       # los checks requeridos nunca correrían y el auto-merge esperaría eternamente.
       # workflow_dispatch SÍ está exento: lanzamos ci.yml sobre la misma rama/SHA.
