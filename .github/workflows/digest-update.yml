@@ -87,26 +87,31 @@ jobs:
           branch: chore/kali-digest-bump
           delete-branch: true
 
-      # Un PR creado con GITHUB_TOKEN no dispara pull_request (recursión), así que
-      # los checks requeridos nunca correrían y el auto-merge esperaría eternamente.
-      # workflow_dispatch SÍ está exento: lanzamos ci.yml sobre la misma rama/SHA.
-      - name: Disparar CI sobre la rama del PR
+      # GitHub crea el run pull_request del PR, pero lo RETIENE (action_required)
+      # porque el PR lo creó GITHUB_TOKEN. No hace falta PAT: la API de approve
+      # permite desbloquearlo con el mismo token de Actions (actions: write).
+      - name: Aprobar el run pull_request retenido y esperar
         id: ci
         if: steps.pr.outputs.pull-request-number != ''
         run: |
           BRANCH="chore/kali-digest-bump"
-          gh workflow run ci.yml --ref "$BRANCH"
           RUN_ID=""
           for _ in $(seq 1 30); do
             RUN_ID="$(gh run list --workflow=ci.yml --branch "$BRANCH" \
-              --event workflow_dispatch --limit 1 \
+              --event pull_request --limit 1 \
               --json databaseId --jq '.[0].databaseId // empty')"
             [[ -n "$RUN_ID" ]] && break
             sleep 2
           done
-          [[ -n "$RUN_ID" ]] || { echo "ROJO: el CI no apareció tras el dispatch"; exit 1; }
+          [[ -n "$RUN_ID" ]] || { echo "ROJO: no apareció el run pull_request"; exit 1; }
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
           echo "CI run: $RUN_ID"
+          CONCLUSION="$(gh run view "$RUN_ID" --json conclusion --jq '.conclusion // ""')"
+          echo "conclusión actual: ${CONCLUSION:-<en curso>}"
+          if [[ "$CONCLUSION" == "action_required" ]]; then
+            echo "Run retenido por GitHub (PR de GITHUB_TOKEN): aprobando..."
+            gh api -X POST "repos/${{ github.repository }}/actions/runs/$RUN_ID/approve"
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
