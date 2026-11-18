@@ -37,10 +37,12 @@ jobs:
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           IMAGE="secforge-${{ matrix.variant }}"
+          # GHCR exige namespace en minúsculas: github.repository_owner puede traer mayúsculas.
+          OWNER="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
           MAJOR="$(echo "${{ github.ref_name }}" | cut -d. -f1)"
           for tag in "${{ github.ref_name }}" "${MAJOR}"; do
-            docker tag "${IMAGE}:nix" "ghcr.io/${{ github.repository_owner }}/${IMAGE}:${tag}"
-            docker push "ghcr.io/${{ github.repository_owner }}/${IMAGE}:${tag}"
+            docker tag "${IMAGE}:nix" "ghcr.io/${OWNER}/${IMAGE}:${tag}"
+            docker push "ghcr.io/${OWNER}/${IMAGE}:${tag}"
           done
       - name: Smoke L2 sobre la imagen recién construida
         run: |
