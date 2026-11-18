@@ -39,6 +39,10 @@ jobs:
         with:
           config-file: .github/release-please-config.json
           manifest-file: .github/release-please-manifest.json
+          # Evita que la action intente crear la Release de GitHub (falla por
+          # permisos del GITHUB_TOKEN). Solo crea el TAG al mergear el PR.
+          # La Release la crea release.yml (disparado por workflow_dispatch).
+          skip-github-release: true
 
       # El PR de release lo crea GITHUB_TOKEN → GitHub RETIENE su run de CI
       # (conclusion=action_required) y los checks requeridos (L0, L1+L2) nunca se
@@ -103,15 +107,16 @@ jobs:
 
       # Un tag creado por GITHUB_TOKEN no dispara 'push: tags'. Se despacha
       # release.yml explícitamente sobre el tag recién creado.
+      # Con skip-github-release: true, release_created=false pero tag_name
+      # SÍ está disponible. Disparamos si hay tag_name.
       - name: Disparar release.yml para el tag recién creado
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ steps.rp.outputs.tag_name }}"
-          CREATED="${{ steps.rp.outputs.release_created }}"
-          echo "release-please: release_created=$CREATED tag_name=${TAG:-<ninguno>}"
-          if [[ -z "$TAG" || "$CREATED" != "true" ]]; then
-            echo "No se creó ningún release en esta ejecución: nada que publicar"
+          echo "release-please: tag_name=${TAG:-<ninguno>}"
+          if [[ -z "$TAG" ]]; then
+            echo "release-please no creó ningún tag en esta ejecución: nada que publicar"
             exit 0
           fi
 
