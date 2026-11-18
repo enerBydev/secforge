@@ -130,7 +130,7 @@ Si un bug nuevo encaja con un patrón, actualizar esta tabla; si no, issue con r
   REPOSO en el propio store (tar de `kali-forensics`), verificable saltando la
   page cache con O_DIRECT. El disco vuelve a ser sospechoso junto a la RAM.
 
-## 12. Corrupción EN REPOSO confirmada: el tar del store cambió DESPUÉS del build
+## 12. Corrupción del hash REGISTRADO en vuelo (diagnóstico inicial «at-rest» — corregido por CI)
 
 - **Síntoma**: el tar de `kali-forensics` falló la doble verificación del
   pipeline (pass1 `936008a9...` vs pass2 `88939d13...` — DOS lecturas del MISMO
@@ -145,7 +145,7 @@ Si un bug nuevo encaja con un patrón, actualizar esta tabla; si no, issue con r
   `dd iflag=direct` (bypass total de la page cache, lectura directa del NVMe):
   las 4 devolvieron `88939d13...` — el MISMO contenido erróneo, de forma
   estable. Los bytes corruptos están EN EL DISPOSITIVO, no solo en memoria.
-- **Diagnóstico CORRECTO (refina el #11)**: corrupción at-rest en el NVMe
+- **Diagnóstico inicial (refina el #11) — REVERTIDO por CI, ver corrección al final**: corrupción at-rest en el NVMe
   (WD Green SN350). SMART limpio NO descarta esto: el firmware solo cuenta los
   errores que él mismo detecta; la corrupción silenciosa de datos no aparece.
   Los hashes erróneos "deterministas" del daemon docker (#11, `9f90c4ff...`)
@@ -165,3 +165,62 @@ Si un bug nuevo encaja con un patrón, actualizar esta tabla; si no, issue con r
      corrupto hasta cerrar la recogida de evidencia.
   4. Los otros 5 tars pasaron `nix store verify` y smoke en podman, pero se
      re-verificarán en CI antes de publicar (prudencia, no evidencia).
+- **CORRECCIÓN (CI, run 44234966220) — el veredicto «at-rest» era FALSO**:
+  CI reconstruyó `kali-forensics` en el MISMO store path (`f7jj4ivs...`, el
+  path depende del `.drv`, no del contenido) y el L4 dio
+  `hash1 = hash2 = 88939d13...` — exactamente el contenido que las lecturas
+  O_DIRECT locales devolvían de forma estable. Es decir: **los bytes en disco
+  eran los canónicos; lo corrupto era el hash que Nix registró al terminar el
+  build local** (`82c7170b...`). La corrupción ocurrió EN VUELO mientras se
+  hasheaba/registraba la salida (RAM), no en reposo en el NVMe.
+  Los «4 hashes distintos» no eran 4 estados estables del fichero, sino
+  cálculos/lecturas corruptas en distintos momentos; el único valor confirmado
+  por una máquina independiente es `88939d13...`.
+  La cuarentena sigue vigente, pero el diagnóstico cambia: esta máquina
+  corrompe **computaciones del build** (hashing/registro) y también puede
+  hornear bytes corruptos en la salida (ver #13). Un desacuerdo entre el hash
+  de la BD de Nix y el contenido NO demuestra corrupción at-rest; solo un
+  rebuild en otra máquina lo dirime.
+
+## 13. Build local válido-pero-corrupto: ni los digests internos ni el smoke lo detectan
+
+- **Evidencia (web)**: mismo store path `3ly54vify...` en local y CI.
+  - local: `27ccf6e1...`, 1 736 541 281 B (lectura estable, doble).
+  - CI: `d9371704...`, 1 736 541 302 B (L4 `hash1 = hash2`), descargado como
+    artifact y re-hasheado aquí: coincide (`d9371704...`), así que la máquina
+    lee bien ficheros ajenos.
+- **Anatomía interna** (`manifest.json` + `rootfs.diff_ids`):
+  | capa | local | CI (canónico) |
+  |---|---|---|
+  | 1 (base Kali) | `95cdb153...` | `95cdb153...` ✓ |
+  | 2 (toolchain, ~2,65 GiB) | `79b969e4...` | `cd19538b...` ✗ |
+  | 3 (ajustes finales) | `1778b4cb...` | `1778b4cb...` ✓ |
+  La capa 2 difiere; la 1 y la 3 son idénticas. Los 21 bytes de diferencia
+  total son compresión distinta de bytes distintos, no un flip en el header.
+- **Por qué parecía válido**: `dockerTools` reconstruye el tar y **calcula sus
+  propios digests sobre los bytes que escribe**. Si la corrupción ocurre
+  durante la generación (RAM), el resultado es una imagen **autoconsistente**:
+  podman verifica cada blob contra su digest y pasa; el smoke pasa; `nix store
+  verify` no mira el contenido esperado (solo el hash registrado, que también
+  se corrompió). **Válido ≠ correcto.**
+- **Implicación**: la única prueba que distingue esto es un **rebuild en otra
+  máquina** (mismo `.drv`/store path → se comparan bytes). Un L4 en la misma
+  máquina no basta: dos builds sobre la misma RAM defectuosa pueden corromperse
+  de forma distinta o idéntica sin que lo notes. El gate real es el CI:
+  L4 + smoke + artifact hasheado, comparable con los valores canónicos.
+- **Tabla canónica (run 44234966220, 9/9 variantes, L4 `hash1 = hash2`)**:
+  | variante | store path | sha256 canónico | smoke |
+  |---|---|---|---|
+  | slim | `5cagswf6...` | `4aa57410250106a278113591b03b457799125f66a7b3e8be99333c5e948e94a6` | 15 PASS, 0 FAIL |
+  | password | `9i07snm3...` | `e34fd29c51c24b09c417b414e83da122d15f484f6aa841247f2da23f515d1b78` | 6 PASS, 0 FAIL |
+  | recon | `20clm52l...` | `72215b92b63cd61156807845706a39f86f5e2ec235454f1af810d42f1d90275c` | 3 PASS, 0 FAIL |
+  | network | `gjnkn1jk...` | `3f94abdf0ca5aab121ee7cf3af08ae3ce2171d728e9772582ca8bd74e484cf6f` | 9 PASS, 0 FAIL |
+  | blueteam | `23zn4zwf...` | `eef3aa81404445eedeff875bd266f58a14059c0b4e905f9ed2420dcaae7e9cfd` | 4 PASS, 0 FAIL |
+  | redteam | `l4fy1dww...` | `0193234da72309c10a2c8d4967e899b1431921f2360ac0bb604ee3791d9093f2` | 4 PASS, 0 FAIL |
+  | forensics | `f7jj4ivs...` | `88939d1369c50949929cba6ddbfd7c952dec6a5af1c06445986176777c4228ef` | 5 PASS, 0 FAIL |
+  | web | `3ly54vify...` | `d9371704d3ff297bb6121e47ccd5bf8bfffc4b6ed6e7f0ec454b80a9ddd60080` | 10 PASS, 0 FAIL |
+  | full | `6bmvb629...` | `2da77e249c25c7f591949c3671ac66665ee80c09d4fd1bc59400aa9ab18d7190` | 56 PASS, 0 FAIL |
+  Los hashes de `password`, `recon` y `network` coinciden con los que produjo
+  la máquina local en builds anteriores → el **determinismo entre máquinas es
+  real** cuando no hay corrupción; las discrepancias de `web` y del hash
+  registrado de `forensics` son la excepción patológica, no la norma.
