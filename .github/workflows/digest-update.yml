@@ -95,15 +95,20 @@ jobs:
         if: steps.pr.outputs.pull-request-number != ''
         run: |
           BRANCH="chore/kali-digest-bump"
+          PR="${{ steps.pr.outputs.pull-request-number }}"
+          HEAD_SHA="$(gh pr view "$PR" --json headRefOid --jq .headRefOid)"
+          echo "PR #$PR head=$HEAD_SHA"
           RUN_ID=""
-          for _ in $(seq 1 30); do
+          for _ in $(seq 1 45); do
+            # Filtrar por SHA: la rama puede tener runs de intentos anteriores.
             RUN_ID="$(gh run list --workflow=ci.yml --branch "$BRANCH" \
-              --event pull_request --limit 1 \
-              --json databaseId --jq '.[0].databaseId // empty')"
+              --event pull_request --limit 50 --json databaseId,headSha \
+              | jq -r --arg sha "$HEAD_SHA" \
+                '[.[] | select(.headSha == $sha) | .databaseId][0] // empty')"
             [[ -n "$RUN_ID" ]] && break
             sleep 2
           done
-          [[ -n "$RUN_ID" ]] || { echo "ROJO: no apareció el run pull_request"; exit 1; }
+          [[ -n "$RUN_ID" ]] || { echo "ROJO: no apareció el run pull_request del head $HEAD_SHA"; exit 1; }
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
           echo "CI run: $RUN_ID"
           # El run puede tardar unos segundos en pasar de queued a action_required.
@@ -126,8 +131,7 @@ jobs:
         if: steps.pr.outputs.pull-request-number != ''
         run: |
           gh run watch "${{ steps.ci.outputs.run_id }}" --exit-status --interval 20
-          PR="$(gh pr list --state open --head chore/kali-digest-bump \
-            --json number --jq '.[0].number // empty')"
+          PR="${{ steps.pr.outputs.pull-request-number }}"
           [[ -n "$PR" ]] || { echo "ROJO: PR no encontrado"; exit 1; }
           gh pr merge "$PR" --squash
           echo "PR #$PR mergeado tras CI verde" >> "$GITHUB_STEP_SUMMARY"
