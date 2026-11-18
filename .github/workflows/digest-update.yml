@@ -106,12 +106,19 @@ jobs:
           [[ -n "$RUN_ID" ]] || { echo "ROJO: no apareció el run pull_request"; exit 1; }
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
           echo "CI run: $RUN_ID"
-          CONCLUSION="$(gh run view "$RUN_ID" --json conclusion --jq '.conclusion // ""')"
-          echo "conclusión actual: ${CONCLUSION:-<en curso>}"
-          if [[ "$CONCLUSION" == "action_required" ]]; then
-            echo "Run retenido por GitHub (PR de GITHUB_TOKEN): aprobando..."
-            gh api -X POST "repos/${{ github.repository }}/actions/runs/$RUN_ID/approve"
-          fi
+          # El run puede tardar unos segundos en pasar de queued a action_required.
+          for _ in $(seq 1 20); do
+            STATUS="$(gh run view "$RUN_ID" --json status --jq '.status')"
+            CONCLUSION="$(gh run view "$RUN_ID" --json conclusion --jq '.conclusion // ""')"
+            echo "estado: $STATUS / ${CONCLUSION:-<sin conclusión>}"
+            if [[ "$CONCLUSION" == "action_required" ]]; then
+              echo "Run retenido por GitHub (PR de GITHUB_TOKEN): aprobando..."
+              gh api -X POST "repos/${{ github.repository }}/actions/runs/$RUN_ID/approve"
+              break
+            fi
+            [[ "$STATUS" == "in_progress" || "$STATUS" == "completed" ]] && break
+            sleep 2
+          done
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
