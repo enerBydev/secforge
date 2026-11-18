@@ -31,23 +31,73 @@ jobs:
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
         # Sin token configurado, best-effort: el release no debe romperse por esto.
         continue-on-error: true
-      - run: nix build .#kali-${{ matrix.variant }}
-      - run: docker load < result
+
+      - name: Build
+        id: build
+        run: |
+          TAR=$(nix build .#kali-${{ matrix.variant }} --no-link --print-out-paths)
+          echo "tar=$TAR" >> "$GITHUB_OUTPUT"
+          echo "tar: $TAR"
+
+      - name: Verificar integridad del tar (nix store verify + sha256 doble)
+        id: verify
+        run: |
+          TAR='${{ steps.build.outputs.tar }}'
+          nix store verify "$TAR"
+          H1=$(sha256sum "$TAR" | awk '{print $1}')
+          H2=$(sha256sum "$TAR" | awk '{print $1}')
+          echo "sha256 #1: $H1"
+          echo "sha256 #2: $H2"
+          [ "$H1" = "$H2" ] || { echo "ROJO: lecturas distintas $H1 vs $H2"; exit 1; }
+          echo "sha256=$H1" >> "$GITHUB_OUTPUT"
+
+      # Gotcha #11: docker load puede imprimir un Error y salir 0. Detectar en la SALIDA.
+      - name: docker load supervisado
+        run: |
+          OUT=$(docker load < '${{ steps.build.outputs.tar }}' 2>&1) || { echo "$OUT"; exit 1; }
+          echo "$OUT"
+          if echo "$OUT" | grep -qi 'error'; then
+            echo "ROJO: docker load reportó error pese a exit 0 (gotcha #11)"; exit 1
+          fi
+
+      # El smoke va ANTES de publicar: nunca subir a GHCR una imagen que no pasa.
+      - name: Smoke L2 obligatorio (antes de publicar)
+        run: RUNTIME=docker bash tests/smoke.sh "secforge-${{ matrix.variant }}:nix" "tests/smoke/${{ matrix.variant }}.tsv"
+
       - name: Push a GHCR con tags semánticos
+        id: push
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           IMAGE="secforge-${{ matrix.variant }}"
           # GHCR exige namespace en minúsculas: github.repository_owner puede traer mayúsculas.
           OWNER="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
-          MAJOR="$(echo "${{ github.ref_name }}" | cut -d. -f1)"
-          for tag in "${{ github.ref_name }}" "${MAJOR}"; do
+          REF="${{ github.ref_name }}"          # v0.1.0
+          MINOR="$(echo "$REF" | cut -d. -f1,2)" # v0.1
+          MAJOR="$(echo "$REF" | cut -d. -f1)"   # v0
+          SHA_TAG="sha-${GITHUB_SHA:0:7}"        # commit
+          for tag in "$REF" "$MINOR" "$MAJOR" "$SHA_TAG"; do
             docker tag "${IMAGE}:nix" "ghcr.io/${OWNER}/${IMAGE}:${tag}"
             docker push "ghcr.io/${OWNER}/${IMAGE}:${tag}"
           done
-      - name: Smoke L2 sobre la imagen recién construida
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "ghcr.io/${OWNER}/${IMAGE}:${REF}")
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "GHCR: $DIGEST"
+
+      - name: Evidencia de release (sha256 + digest)
         run: |
-          docker load < result
-          RUNTIME=docker bash tests/smoke.sh "secforge-${{ matrix.variant }}:nix" "tests/smoke/${{ matrix.variant }}.tsv"
+          {
+            echo "variant=${{ matrix.variant }}"
+            echo "tag=${{ github.ref_name }}"
+            echo "commit=${{ github.sha }}"
+            echo "sha256_tar=${{ steps.verify.outputs.sha256 }}"
+            echo "image_digest=${{ steps.push.outputs.digest }}"
+          } | tee "release-${{ matrix.variant }}.txt"
+          cat "release-${{ matrix.variant }}.txt" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-${{ matrix.variant }}
+          path: release-${{ matrix.variant }}.txt
 
   release:
     name: GitHub Release con notas
