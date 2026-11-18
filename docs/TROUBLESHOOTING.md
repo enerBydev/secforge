@@ -176,51 +176,76 @@ Si un bug nuevo encaja con un patrón, actualizar esta tabla; si no, issue con r
   Los «4 hashes distintos» no eran 4 estados estables del fichero, sino
   cálculos/lecturas corruptas en distintos momentos; el único valor confirmado
   por una máquina independiente es `88939d13...`.
-  La cuarentena sigue vigente, pero el diagnóstico cambia: esta máquina
-  corrompe **computaciones del build** (hashing/registro) y también puede
-  hornear bytes corruptos en la salida (ver #13). Un desacuerdo entre el hash
-  de la BD de Nix y el contenido NO demuestra corrupción at-rest; solo un
-  rebuild en otra máquina lo dirime.
+  La cuarentena sigue vigente: el defecto demostrado de esta máquina es la
+  corrupción EN VUELO del hashing/registro (el hash que Nix escribió en su BD
+  no era el del fichero). Un desacuerdo entre el hash de la BD de Nix y el
+  contenido NO demuestra corrupción at-rest; solo un rebuild en otra máquina
+  lo dirime. (La hipótesis de «build corrupto» en `web` se descartó: ver #13.)
 
-## 13. Build local válido-pero-corrupto: ni los digests internos ni el smoke lo detectan
+## 13. Web/full: el tar NO es byte-reproducible ENTRE RUNS (no es corrupción)
 
-- **Evidencia (web)**: mismo store path `3ly54vify...` en local y CI.
-  - local: `27ccf6e1...`, 1 736 541 281 B (lectura estable, doble).
-  - CI: `d9371704...`, 1 736 541 302 B (L4 `hash1 = hash2`), descargado como
-    artifact y re-hasheado aquí: coincide (`d9371704...`), así que la máquina
-    lee bien ficheros ajenos.
-- **Anatomía interna** (`manifest.json` + `rootfs.diff_ids`):
-  | capa | local | CI (canónico) |
-  |---|---|---|
-  | 1 (base Kali) | `95cdb153...` | `95cdb153...` ✓ |
-  | 2 (toolchain, ~2,65 GiB) | `79b969e4...` | `cd19538b...` ✗ |
-  | 3 (ajustes finales) | `1778b4cb...` | `1778b4cb...` ✓ |
-  La capa 2 difiere; la 1 y la 3 son idénticas. Los 21 bytes de diferencia
-  total son compresión distinta de bytes distintos, no un flip en el header.
-- **Por qué parecía válido**: `dockerTools` reconstruye el tar y **calcula sus
-  propios digests sobre los bytes que escribe**. Si la corrupción ocurre
-  durante la generación (RAM), el resultado es una imagen **autoconsistente**:
-  podman verifica cada blob contra su digest y pasa; el smoke pasa; `nix store
-  verify` no mira el contenido esperado (solo el hash registrado, que también
-  se corrompió). **Válido ≠ correcto.**
-- **Implicación**: la única prueba que distingue esto es un **rebuild en otra
-  máquina** (mismo `.drv`/store path → se comparan bytes). Un L4 en la misma
-  máquina no basta: dos builds sobre la misma RAM defectuosa pueden corromperse
-  de forma distinta o idéntica sin que lo notes. El gate real es el CI:
-  L4 + smoke + artifact hasheado, comparable con los valores canónicos.
-- **Tabla canónica (run 44234966220, 9/9 variantes, L4 `hash1 = hash2`)**:
-  | variante | store path | sha256 canónico | smoke |
+- **Síntoma**: el sha256 del tar de `web` y de `full` cambia entre ejecuciones
+  de CI con el MISMO flake (`git diff` de `flake.nix`/`flake.lock`/`images/`/
+  `presets/`/`tests/` entre ambos commits: vacío), mientras las otras 7
+  variantes son estables. Serie de 4 observaciones (todas con entradas
+  idénticas):
+  | variante | build-all#1 (04:07) | release (06:29) | build-all#2 (06:50) | local |
+  |---|---|---|---|---|
+  | web | `d9371704` | `27ccf6e1` | `27ccf6e1` | `27ccf6e1` |
+  | full | `2da77e24` | `af2457bd` | `2da77e24` | — |
+  Las 7 restantes dieron SIEMPRE el mismo valor (tabla final).
+- **Autopsia (la clave)**: se extrajeron las dos capas 2 de web (63 417 entradas
+  cada una) y se compararon miembro a miembro: **difieren en UN SOLO symlink**:
+  ```
+  /nix/store/wfdylhcz...-burpsuite-2026.10.1-fhsenv-rootfs/usr/bin/dbus-launch
+    → /nix/store/qbv74lpz...-dbus-1.16.2-lib/bin/dbus-launch   (build-all#1)
+    → /nix/store/ylyx1gj...-dbus-1.16.2/bin/dbus-launch        (release/#2/local)
+  ```
+  Es una **colisión de nombres entre dos salidas del mismo paquete `dbus`**
+  (`dbus` y `dbus-lib`) dentro del rootfs FHS que nixpkgs construye para
+  `burpsuite` (`buildFHSEnv`): gana el enlace que se cree primero y ese orden
+  depende del estado del store del runner → dos variantes legítimas. Las dos
+  rutas apuntan al MISMO binario, así que la imagen es **funcionalmente
+  idéntica** (smoke 10/10 y 56/56 en ambos casos); solo cambia un symlink, y
+  por eso difieren el `diff_id`, el digest de la imagen y el sha256 del tar.
+- **Corrección del diagnóstico anterior**: este caso se atribuyó antes a
+  «build local corrupto». **ERA UN ERROR**: el tar local de web (`27ccf6e1`)
+  es byte a byte el mismo que produjo el release en CI (`27ccf6e1`) y que
+  build-all#2 (`27ccf6e1`); el valor minoritario (`d9371704`) fue el de
+  build-all#1. La máquina local NO corrompió el build de web. El defecto real
+  de esta máquina sigue siendo el del #12 (hash registrado ≠ contenido en
+  `forensics`), no un «build corrupto».
+- **Por qué el L4 no lo detecta**: el L4 (delete + rebuild) compara dos builds
+  **en el mismo runner**, donde la dependencia (`burpsuite` con su rootfs) ya
+  está en el store y se reutiliza → ambos builds dan el mismo symlink. La
+  divergencia solo aparece al comparar **runs distintos**. Por eso el L4 es
+  una prueba de «no haySOURCE de no-determinismo dentro del runner», no de
+  «el contenido es idéntico en todas partes».
+- **Impacto y mitigación**:
+  - Funcional: ninguno (mismo contenido, mismo smoke en verde).
+  - Reproducibilidad: el digest de `web`/`full` **no es estable entre builds**,
+    así que no sirve «reconstruir y comparar digest» para verificar un tag ya
+    publicado. El release.yml publica y GRABA el digest exacto de cada
+    variante en el artifact `release-<variante>.txt`: ese digest es el
+    contrato de la release.
+  - Fix propuesto: eliminar la colisión (override de `burpsuite` para que su
+    rootfs FHS no enlace `dbus-launch`, o fijar el orden de `dbus`/`dbus-lib`)
+    → issue #5. Con ese fix, `web`/`full` vuelven a ser byte-reproducibles y la
+    tabla de hashes es única.
+- **Tabla de hashes del tar (medidos en CI; `web`/`full` tienen dos valores
+  válidos por la colisión del #13)**:
+  | variante | store path | sha256 (CI) | smoke |
   |---|---|---|---|
-  | slim | `5cagswf6...` | `4aa57410250106a278113591b03b457799125f66a7b3e8be99333c5e948e94a6` | 15 PASS, 0 FAIL |
-  | password | `9i07snm3...` | `e34fd29c51c24b09c417b414e83da122d15f484f6aa841247f2da23f515d1b78` | 6 PASS, 0 FAIL |
-  | recon | `20clm52l...` | `72215b92b63cd61156807845706a39f86f5e2ec235454f1af810d42f1d90275c` | 3 PASS, 0 FAIL |
-  | network | `gjnkn1jk...` | `3f94abdf0ca5aab121ee7cf3af08ae3ce2171d728e9772582ca8bd74e484cf6f` | 9 PASS, 0 FAIL |
-  | blueteam | `23zn4zwf...` | `eef3aa81404445eedeff875bd266f58a14059c0b4e905f9ed2420dcaae7e9cfd` | 4 PASS, 0 FAIL |
-  | redteam | `l4fy1dww...` | `0193234da72309c10a2c8d4967e899b1431921f2360ac0bb604ee3791d9093f2` | 4 PASS, 0 FAIL |
-  | forensics | `f7jj4ivs...` | `88939d1369c50949929cba6ddbfd7c952dec6a5af1c06445986176777c4228ef` | 5 PASS, 0 FAIL |
-  | web | `3ly54vify...` | `d9371704d3ff297bb6121e47ccd5bf8bfffc4b6ed6e7f0ec454b80a9ddd60080` | 10 PASS, 0 FAIL |
-  | full | `6bmvb629...` | `2da77e249c25c7f591949c3671ac66665ee80c09d4fd1bc59400aa9ab18d7190` | 56 PASS, 0 FAIL |
-  Los hashes de `password`, `recon` y `network` coinciden con los que produjo
-  la máquina local en builds anteriores → el **determinismo entre máquinas es
-  real** cuando no hay corrupción; las discrepancias de `web` y del hash
-  registrado de `forensics` son la excepción patológica, no la norma.
+  | slim | `5cagswf6...` | `4aa57410250106a278113591b03b457799125f66a7b3e8be99333c5e948e94a6` (estable) | 15 PASS, 0 FAIL |
+  | password | `9i07snm3...` | `e34fd29c51c24b09c417b414e83da122d15f484f6aa841247f2da23f515d1b78` (estable) | 6 PASS, 0 FAIL |
+  | recon | `20clm52l...` | `72215b92b63cd61156807845706a39f86f5e2ec235454f1af810d42f1d90275c` (estable) | 3 PASS, 0 FAIL |
+  | network | `gjnkn1jk...` | `3f94abdf0ca5aab121ee7cf3af08ae3ce2171d728e9772582ca8bd74e484cf6f` (estable) | 9 PASS, 0 FAIL |
+  | blueteam | `23zn4zwf...` | `eef3aa81404445eedeff875bd266f58a14059c0b4e905f9ed2420dcaae7e9cfd` (estable) | 4 PASS, 0 FAIL |
+  | redteam | `l4fy1dww...` | `0193234da72309c10a2c8d4967e899b1431921f2360ac0bb604ee3791d9093f2` (estable) | 4 PASS, 0 FAIL |
+  | forensics | `f7jj4ivs...` | `88939d1369c50949929cba6ddbfd7c952dec6a5af1c06445986176777c4228ef` (estable) | 5 PASS, 0 FAIL |
+  | web | `3ly54vify...` | `27ccf6e116f312c8a93787c91ce146d5895cb83a8634228102d234b2de69776a` (3 obs) / `d9371704d3ff297bb6121e47ccd5bf8bfffc4b6ed6e7f0ec454b80a9ddd60080` (1 obs) | 10 PASS, 0 FAIL |
+  | full | `6bmvb629...` | `2da77e249c25c7f591949c3671ac66665ee80c09d4fd1bc59400aa9ab18d7190` (2 obs) / `af2457bd0a3a753d5fb952a50b4b11ebc59e465bfedbedb6031ecc09cb6fd652` (1 obs) | 56 PASS, 0 FAIL |
+  Las 7 variantes sin `burpsuite` son **byte-idénticas entre máquinas y entre
+  runs** (incluidos los builds locales de `password`/`recon`/`network`), lo que
+  confirma que el determinismo del pipeline es real y que la única
+  discrepancia detectada está acotada al symlink de `dbus-launch`.

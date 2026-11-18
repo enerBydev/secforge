@@ -10,7 +10,8 @@ imágenes Docker reproducibles, devShells declarativos y un módulo NixOS para e
 - [x] Esqueleto del repo, presets, imágenes, tests, CI/CD definidos
 - [x] Bootstrap del digest de Kali (anclado al snapshot del 2026-11-16)
 - [x] L0 en verde: `nix flake check` + statix + deadnix + nixfmt
-- [ ] Primer build verde + smoke
+- [x] Build + smoke L2 en CI para las 9 variantes (`build-all` y `nightly`)
+- [x] Imágenes publicadas en GHCR con tags `vX.Y.Z`, `vX.Y`, `vX` y `sha-<commit>`
 
 ## Imágenes producidas
 
@@ -99,6 +100,8 @@ docker run -it secforge-web:nix -c 'apt update && apt install -y beef-xss'
 | Workflow | Disparador | Función |
 |---|---|---|
 | `ci` | PR/push | L0 + build slim + smoke |
-| `release` | tag `v*` | build de las 9 imágenes → GHCR → GitHub Release |
-| `nightly` | diario | detecta roturas upstream y abre issue |
-| `digest-update` | semanal | PR con el nuevo digest de Kali, merge solo si verde |
+| `build-all` | manual | build + verificación + smoke de las 9 variantes, L4 y artifacts (evidencia) |
+| `release` | tag `v*` | verifica → smoke → publica las 9 imágenes en GHCR (`vX.Y.Z`, `vX.Y`, `vX`, `sha-<commit>`) → GitHub Release |
+| `nightly` | diario | rebuild completo + smoke; abre issue si algo se pone rojo |
+| `digest-update` | semanal | PR con el nuevo digest de Kali; el CI se aprueba y se mergea solo si está verde |
+| `release-please` | push a main | PR de release SemVer; al mergearlo crea el tag `vX.Y.Z` |
