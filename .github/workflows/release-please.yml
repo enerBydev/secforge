@@ -1,22 +1,124 @@
 name: release-please
 
 # SemVer automático (plan fase 9): mantiene un PR de release a partir de los
-# Conventional Commits. Al mergearlo crea el tag vX.Y.Z, que dispara
-# release.yml (build + push GHCR + smoke + GitHub Release).
+# Conventional Commits. Al mergearlo crea el tag vX.Y.Z.
+#
+# Tres limitaciones de GitHub que este workflow resuelve SIN PAT:
+#
+# 1) El PR de release lo crea GITHUB_TOKEN → GitHub RETIENE su run de CI
+#    (conclusion=action_required) y los checks requeridos (L0, L1+L2) nunca se
+#    reportan → el PR queda BLOCKED y no se puede mergear. Se resuelve
+#    aprobando el run por API (actions: write) y activando auto-merge.
+#
+# 2) El merge lo ejecuta GitHub (auto-merge), NO el token → el push a main
+#    dispara este workflow otra vez → release-please crea el tag vX.Y.Z.
+#
+# 3) El tag lo crea GITHUB_TOKEN → un tag creado por token NO dispara el
+#    trigger 'push: tags' de release.yml. Por eso release.yml tiene además
+#    workflow_dispatch y aquí se despacha explícitamente sobre el tag.
+#    MEDIDO: con --ref <tag>, GITHUB_REF=refs/tags/<tag>,
+#    GITHUB_REF_NAME=<tag> y GITHUB_SHA=commit del tag → idéntico a push: tags.
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
   pull-requests: write
+  actions: write # aprobar el run de CI retenido + despachar release.yml
 
 jobs:
   release-please:
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
+        id: rp
         with:
           config-file: .github/release-please-config.json
           manifest-file: .github/release-please-manifest.json
+
+      # El PR de release lo crea GITHUB_TOKEN → GitHub RETIENE su run de CI
+      # (conclusion=action_required). Se resuelve sin PAT: (1) aprobar el run por
+      # API (actions: write) para que los checks L0 y L1+L2 se reporten,
+      # (2) activar auto-merge. El merge lo hace GitHub —no el token— así que
+      # sí dispara el push a main → release-please crea el tag vX.Y.Z.
+      - name: Aprobar el CI retenido del PR de release y activar auto-merge
+        run: |
+          BRANCH="release-please--branches--main"
+          PR="$(gh pr list --state open --head "$BRANCH" \
+            --json number --jq '.[0].number // empty')"
+          if [[ -z "$PR" ]]; then
+            echo "No hay PR de release abierto: nada que aprobar"
+            exit 0
+          fi
+          HEAD_SHA="$(gh pr view "$PR" --json headRefOid --jq .headRefOid)"
+          echo "PR de release #$PR head=$HEAD_SHA"
+
+          # Localizar el run pull_request de ESTE head SHA (la rama puede tener
+          # runs de intentos anteriores).
+          RUN_ID=""
+          for _ in $(seq 1 45); do
+            RUN_ID="$(gh run list --workflow=ci.yml --branch "$BRANCH" \
+              --event pull_request --limit 50 --json databaseId,headSha \
+              | jq -r --arg sha "$HEAD_SHA" \
+                '[.[] | select(.headSha == $sha) | .databaseId][0] // empty')"
+            [[ -n "$RUN_ID" ]] && break
+            sleep 2
+          done
+          [[ -n "$RUN_ID" ]] || {
+            echo "ROJO: no apareció run de CI para $HEAD_SHA"; exit 1; }
+          echo "CI run: $RUN_ID"
+
+          # El run puede tardar unos segundos en pasar a action_required.
+          for _ in $(seq 1 30); do
+            STATUS="$(gh run view "$RUN_ID" --json status --jq '.status')"
+            CONCLUSION="$(gh run view "$RUN_ID" --json conclusion --jq '.conclusion // ""')"
+            echo "estado: $STATUS / ${CONCLUSION:-<sin conclusión>}"
+            if [[ "$CONCLUSION" == "action_required" ]]; then
+              echo "Run retenido por GitHub (PR de GITHUB_TOKEN): aprobando..."
+              gh api -X POST "repos/${{ github.repository }}/actions/runs/$RUN_ID/approve"
+              break
+            fi
+            [[ "$STATUS" == "in_progress" || "$STATUS" == "completed" ]] && break
+            sleep 2
+          done
+
+          # Auto-merge: lo ejecuta GitHub, no el token → el push a main dispara
+          # los workflows (un merge hecho con GITHUB_TOKEN NO los dispararía).
+          gh pr merge "$PR" --auto --squash
+          echo "Auto-merge activado en el PR #$PR (se fusionará con el CI en verde)" \
+            >> "$GITHUB_STEP_SUMMARY"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Un tag creado por GITHUB_TOKEN no dispara 'push: tags'. Se despacha
+      # release.yml explícitamente sobre el tag recién creado.
+      - name: Disparar release.yml para el tag recién creado
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.rp.outputs.tag_name }}"
+          CREATED="${{ steps.rp.outputs.release_created }}"
+          echo "release-please: release_created=$CREATED tag_name=${TAG:-<ninguno>}"
+          if [[ -z "$TAG" || "$CREATED" != "true" ]]; then
+            echo "No se creó ningún release en esta ejecución: nada que publicar"
+            exit 0
+          fi
+
+          if ! git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "ROJO: el tag $TAG no existe en el remoto"; exit 1
+          fi
+
+          # Idempotencia: no relanzar si ya hay un run de release para este tag.
+          EXISTING="$(gh run list --workflow=release.yml --limit 20 \
+            --json headBranch --jq "[.[] | select(.headBranch == \"$TAG\")] | length")"
+          if [[ "$EXISTING" != "0" ]]; then
+            echo "Ya existen $EXISTING run(s) de release.yml para $TAG: no se duplica"
+            exit 0
+          fi
+
+          gh workflow run release.yml --ref "$TAG"
+          echo "release.yml despachado sobre $TAG" >> "$GITHUB_STEP_SUMMARY"

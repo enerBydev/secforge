@@ -3,6 +3,12 @@ name: release
 on:
   push:
     tags: ['v*']
+  # Fallback automático: release-please crea el tag con GITHUB_TOKEN y GitHub
+  # NO dispara workflows con tags creados por un token. release-please.yml
+  # despacha este workflow por API con --ref <tag> (workflow_dispatch SÍ se
+  # dispara con GITHUB_TOKEN). Con ref de tag, github.ref_name = vX.Y.Z y
+  # github.sha = commit del tag → el resto del workflow no cambia.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -105,7 +111,34 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: GitHub Release con notas (idempotente — release-please puede haberla creado ya)
-        run: gh release create "${{ github.ref_name }}" --generate-notes 2>/dev/null || gh release view "${{ github.ref_name }}"
+      # Idempotencia real: release-please puede haber creado ya una Release
+      # (a veces en DRAFT) para este tag. `gh release create` sobre un tag que
+      # ya tiene una release NO es idempotente: crea una SEGUNDA release
+      # (medido) → duplicados con el mismo tag. Aquí se:
+      #   1) publica el draft existente si lo hay,
+      #   2) si no existe ninguna, la crea,
+      #   3) borra cualquier OTRO draft con el mismo tag (basura de intentos).
+      - name: GitHub Release con notas (idempotente)
+        run: |
+          set -euo pipefail
+          TAG="${{ github.ref_name }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "La Release $TAG ya existe: se publica si estaba en draft"
+            if [[ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" == "true" ]]; then
+              gh release edit "$TAG" --draft=false
+              echo "Draft publicado"
+            fi
+          else
+            gh release create "$TAG" --generate-notes --title "$TAG"
+            echo "Release creada"
+          fi
+          # Limpieza de drafts duplicados con el mismo tag.
+          for ID in $(gh api "repos/${{ github.repository }}/releases" \
+            --jq '.[] | select(.tag_name == "'"$TAG"'" and .draft == true) | .id'); do
+            echo "Borrando draft duplicado $ID"
+            gh api -X DELETE "repos/${{ github.repository }}/releases/$ID"
+          done
+          gh release view "$TAG" --json url,isDraft,tagName,publishedAt \
+            --jq '"Release: \(.tagName) draft=\(.isDraft) published=\(.publishedAt) \(.url)"'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
