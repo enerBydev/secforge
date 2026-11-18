@@ -12,7 +12,7 @@
 { pkgs }:
 pkgs.dockerTools.pullImage {
   imageName = "kalilinux/kali-rolling";
-  imageDigest = "sha256:12e581978942a815b35ab2406725c274a4f28825650595d2ec2b7fb7668b039d";
+  imageDigest = "sha256:1ff4a2be3849333687b3ed2b31bb5af0cd1b7c0a11ec7713feb5abe5a6b2795c";
   sha256 = "sha256-jXucMJETjUoxXa3FA+b6CDOH8xT9GDD6S+ztrNp8ZFU=";
   finalImageName = "kali";
   finalImageTag = "pinned";
