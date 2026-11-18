@@ -34,6 +34,7 @@ jobs:
       - name: Validar que la imagen base sigue construyendo
         run: nix build .#kali-slim
       - name: Crear PR
+        id: pr
         uses: peter-evans/create-pull-request@3ffccacd46053766916f087ce41d627c0b8cf2d1 # v8.1.3
         with:
           commit-message: 'chore(kali): bump snapshot digest'
@@ -49,6 +50,7 @@ jobs:
       # workflow_dispatch SÍ está exento: lanzamos ci.yml sobre la misma rama/SHA.
       - name: Disparar CI sobre la rama del PR
         id: ci
+        if: steps.pr.outputs.pull-request-number != ''
         run: |
           BRANCH="chore/kali-digest-bump"
           gh workflow run ci.yml --ref "$BRANCH"
@@ -67,6 +69,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Mergear solo si el CI está verde
+        if: steps.pr.outputs.pull-request-number != ''
         run: |
           gh run watch "${{ steps.ci.outputs.run_id }}" --exit-status --interval 20
           PR="$(gh pr list --state open --head chore/kali-digest-bump \
