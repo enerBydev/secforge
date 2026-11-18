@@ -27,6 +27,8 @@ jobs:
         with:
           name: secforge
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+        # Sin token configurado, best-effort: el nightly no debe romperse por esto.
+        continue-on-error: true
       - run: nix build .#kali-${{ matrix.variant }}
       - run: |
           docker load < result

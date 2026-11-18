@@ -1,0 +1,119 @@
+name: build-all
+
+# Builds confiables en runners de GitHub para cualquier variante, bajo demanda.
+# Contexto (gotcha #12): la máquina local está en cuarentena por corrupción
+# at-rest; hasta que pase memtest86+ + scan de disco, SOLO los runners de CI
+# son hardware confiable para build/verificación de hashes.
+#
+# Cada variante: build → nix store verify + sha256 doble → docker load
+# supervisado (gotcha #11: el exit code NO vale) → smoke obligatorio →
+# tar + sha256 subidos como artifacts descargables.
+#
+# L4 opcional: con l4-repro=true se recompila (--rebuild) y se exige que el
+# segundo build produzca EXACTAMENTE el mismo store path (byte-reproducible).
+
+on:
+  workflow_dispatch:
+    inputs:
+      variants:
+        description: 'Variantes separadas por espacio (vacío = las 9)'
+        required: false
+        default: ''
+      l4-repro:
+        description: 'Además, recompilar cada variante y exigir store path idéntico (L4)'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    name: resolver variantes
+    runs-on: ubuntu-24.04
+    outputs:
+      variants: ${{ steps.set.outputs.variants }}
+    steps:
+      - id: set
+        env:
+          INPUT: ${{ inputs.variants }}
+        run: |
+          ALL='["slim","network","web","password","recon","forensics","blueteam","redteam","full"]'
+          if [ -z "$INPUT" ]; then
+            echo "variants=$ALL" >> "$GITHUB_OUTPUT"
+          else
+            echo "variants=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1].split()))' "$INPUT")" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: ${{ matrix.variant }} — build + verify + smoke
+    needs: matrix
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJSON(needs.matrix.outputs.variants) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
+      - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
+        with:
+          name: secforge
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+        # Sin token (forks, o hasta configurarlo) el job no debe romperse.
+        continue-on-error: true
+
+      - name: Build + verificación del tar (nix store verify + sha256 doble)
+        id: build
+        run: |
+          V=${{ matrix.variant }}
+          TAR=$(nix build .#kali-$V --no-link --print-out-paths)
+          # Hash que nix registró al terminar el build — debe seguir coincidiendo.
+          nix store verify "$TAR"
+          H1=$(sha256sum "$TAR" | awk '{print $1}')
+          H2=$(sha256sum "$TAR" | awk '{print $1}')
+          [ "$H1" = "$H2" ] || { echo "ROJO: lecturas distintas $H1 vs $H2"; exit 1; }
+          SIZE=$(stat -c '%s' "$TAR")
+          echo "tar=$TAR" >> "$GITHUB_OUTPUT"
+          echo "hash=$H1" >> "$GITHUB_OUTPUT"
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+          echo "$H1  secforge-$V.tar.gz" > "sha256-$V.txt"
+          {
+            echo "### $V"
+            echo '- tar: `'"$TAR"'`'
+            echo '- sha256: `'"$H1"'`'
+            echo "- size: $SIZE bytes"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Gotcha #11: docker load puede imprimir un Error y salir 0. Detectar en la SALIDA.
+      - name: docker load supervisado
+        run: |
+          OUT=$(docker load < '${{ steps.build.outputs.tar }}' 2>&1) || { echo "$OUT"; exit 1; }
+          echo "$OUT"
+          if echo "$OUT" | grep -qi 'error'; then
+            echo "ROJO: docker load reportó error pese a exit 0 (gotcha #11)"; exit 1
+          fi
+
+      - name: Smoke L2 obligatorio
+        run: RUNTIME=docker bash tests/smoke.sh "secforge-${{ matrix.variant }}:nix" "tests/smoke/${{ matrix.variant }}.tsv"
+
+      - name: L4 — rebuild y exigir store path idéntico
+        if: inputs.l4-repro
+        run: |
+          V=${{ matrix.variant }}
+          FIRST='${{ steps.build.outputs.tar }}'
+          SECOND=$(nix build .#kali-$V --rebuild --no-link --print-out-paths)
+          echo "path 1: $FIRST"
+          echo "path 2: $SECOND"
+          [ "$FIRST" = "$SECOND" ] || { echo "ROJO: NO byte-reproducible (L4)"; exit 1; }
+          echo "- L4 ($V): byte-reproducible ✅" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Subir tar + sha256 como artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: secforge-${{ matrix.variant }}-tar
+          path: |
+            ${{ steps.build.outputs.tar }}
+            sha256-${{ matrix.variant }}.txt
+          retention-days: 14
