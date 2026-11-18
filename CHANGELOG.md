@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/enerBydev/secforge/compare/v0.1.0...v0.1.1) (2026-11-18)
+
+
+### Bug Fixes
+
+* **ci:** digest-update no commitea build.err/prefetch.txt en el PR (logs a $RUNNER_TEMP) y .gitignore del workspace ([3244a08](https://github.com/enerBydev/secforge/commit/3244a0844a30d6488b99701dad2c0ba26d20f69f))
+
 ## 0.1.0 (2026-11-18)
 
 
