@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Permite re-disparar el CI sobre la rama de un PR creado por GITHUB_TOKEN
+  # (los eventos pull_request de ese token no generan runs). Ver digest-update.yml.
+  workflow_dispatch:
 
 permissions:
   contents: read

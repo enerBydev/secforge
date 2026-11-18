@@ -11,6 +11,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write # workflow_dispatch + consultar el run del CI
 
 jobs:
   bump-kali-digest:
@@ -43,9 +44,35 @@ jobs:
             - Si el CI falla, el auto-merge no procederá.
           branch: chore/kali-digest-bump
           delete-branch: true
-      - name: Activar auto-merge (requiere protección de rama en main)
+      # Un PR creado con GITHUB_TOKEN no dispara pull_request (recursión), así que
+      # los checks requeridos nunca correrían y el auto-merge esperaría eternamente.
+      # workflow_dispatch SÍ está exento: lanzamos ci.yml sobre la misma rama/SHA.
+      - name: Disparar CI sobre la rama del PR
+        id: ci
         run: |
-          PR="$(gh pr list --state open --head chore/kali-digest-bump --json number -q '.[0].number')"
-          if [[ -n "$PR" ]]; then gh pr merge "$PR" --auto --squash; fi
+          BRANCH="chore/kali-digest-bump"
+          gh workflow run ci.yml --ref "$BRANCH"
+          RUN_ID=""
+          for _ in $(seq 1 30); do
+            RUN_ID="$(gh run list --workflow=ci.yml --branch "$BRANCH" \
+              --event workflow_dispatch --limit 1 \
+              --json databaseId --jq '.[0].databaseId // empty')"
+            [[ -n "$RUN_ID" ]] && break
+            sleep 2
+          done
+          [[ -n "$RUN_ID" ]] || { echo "ROJO: el CI no apareció tras el dispatch"; exit 1; }
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "CI run: $RUN_ID"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Mergear solo si el CI está verde
+        run: |
+          gh run watch "${{ steps.ci.outputs.run_id }}" --exit-status --interval 20
+          PR="$(gh pr list --state open --head chore/kali-digest-bump \
+            --json number --jq '.[0].number // empty')"
+          [[ -n "$PR" ]] || { echo "ROJO: PR no encontrado"; exit 1; }
+          gh pr merge "$PR" --squash
+          echo "PR #$PR mergeado tras CI verde" >> "$GITHUB_STEP_SUMMARY"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
