@@ -9,8 +9,8 @@ name: build-all
 # supervisado (gotcha #11: el exit code NO vale) → smoke obligatorio →
 # tar + sha256 subidos como artifacts descargables.
 #
-# L4 opcional: con l4-repro=true se recompila (--rebuild) y se exige que el
-# segundo build produzca EXACTAMENTE el mismo store path (byte-reproducible).
+# L4 opcional: con l4-repro=true se borra el tar del store, se reconstruye
+# (los inputs siguen válidos: solo re-ensambla) y se exige el MISMO sha256.
 
 on:
   workflow_dispatch:
@@ -56,6 +56,16 @@ jobs:
         variant: ${{ fromJSON(needs.matrix.outputs.variants) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Los runners traen ~15 GB de SDKs preinstalados; full descomprimida
+      # puede necesitar >20 GB (plan, fase 9). Liberar antes de construir.
+      - name: Liberar espacio de disco
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /usr/local/.ghc /opt/hostedtoolcache/CodeQL || true
+          sudo docker image prune -af >/dev/null 2>&1 || true
+          df -h /
+
       - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
         with:
@@ -86,6 +96,22 @@ jobs:
             echo "- size: $SIZE bytes"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # L4 ANTES del docker load: el rebuild duplica el tar transitoriamente;
+      # sin la extracción de docker en disco, el pico es menor.
+      - name: L4 — rebuild y exigir hash idéntico
+        if: inputs.l4-repro
+        run: |
+          V=${{ matrix.variant }}
+          FIRST='${{ steps.build.outputs.tar }}'
+          FIRST_H='${{ steps.build.outputs.hash }}'
+          nix store delete "$FIRST"
+          SECOND=$(nix build .#kali-$V --no-link --print-out-paths)
+          SECOND_H=$(sha256sum "$SECOND" | awk '{print $1}')
+          echo "hash 1: $FIRST_H"
+          echo "hash 2: $SECOND_H"
+          [ "$FIRST_H" = "$SECOND_H" ] || { echo "ROJO: NO byte-reproducible (L4)"; exit 1; }
+          echo "- L4 ($V): byte-reproducible ✅" >> "$GITHUB_STEP_SUMMARY"
+
       # Gotcha #11: docker load puede imprimir un Error y salir 0. Detectar en la SALIDA.
       - name: docker load supervisado
         run: |
@@ -97,17 +123,6 @@ jobs:
 
       - name: Smoke L2 obligatorio
         run: RUNTIME=docker bash tests/smoke.sh "secforge-${{ matrix.variant }}:nix" "tests/smoke/${{ matrix.variant }}.tsv"
-
-      - name: L4 — rebuild y exigir store path idéntico
-        if: inputs.l4-repro
-        run: |
-          V=${{ matrix.variant }}
-          FIRST='${{ steps.build.outputs.tar }}'
-          SECOND=$(nix build .#kali-$V --rebuild --no-link --print-out-paths)
-          echo "path 1: $FIRST"
-          echo "path 2: $SECOND"
-          [ "$FIRST" = "$SECOND" ] || { echo "ROJO: NO byte-reproducible (L4)"; exit 1; }
-          echo "- L4 ($V): byte-reproducible ✅" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Subir tar + sha256 como artifacts
         uses: actions/upload-artifact@v4
