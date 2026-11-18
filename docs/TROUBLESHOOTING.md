@@ -125,3 +125,43 @@ Si un bug nuevo encaja con un patrón, actualizar esta tabla; si no, issue con r
   verificación (sha256 del tar → releer → sha256, y smoke obligatorio tras
   cada `docker load`) y tratar todo hash local como no verificado hasta
   memtest86+.
+- **Actualización (→ #12)**: el «fichero en disco es correcto» solo era cierto
+  para el tar de `kali-web` de ese momento. Después se confirmó corrupción EN
+  REPOSO en el propio store (tar de `kali-forensics`), verificable saltando la
+  page cache con O_DIRECT. El disco vuelve a ser sospechoso junto a la RAM.
+
+## 12. Corrupción EN REPOSO confirmada: el tar del store cambió DESPUÉS del build
+
+- **Síntoma**: el tar de `kali-forensics` falló la doble verificación del
+  pipeline (pass1 `936008a9...` vs pass2 `88939d13...` — DOS lecturas del MISMO
+  path inmutable de `/nix/store` dieron hashes distintos) y `nix store verify`
+  declaró el path MODIFICADO: el hash que nix registró al terminar el build
+  (base32 `1dhlp3d6...` = hex `82c7170b...`) ya no coincide con lo leído
+  (`0zwj4pjn...` = `c8a7901f...`). En total **4 valores sha256 distintos para el
+  mismo store path** (82c7170b, 936008a9, c8a7901f, 88939d13), con mtime intacto
+  (1969) y sin escritor posible (el store es de solo lectura).
+- **Test de 3 vías (separación RAM vs disco)**: lectura por page cache,
+  re-lectura tras `posix_fadvise(DONTNEED)` y DOS lecturas con
+  `dd iflag=direct` (bypass total de la page cache, lectura directa del NVMe):
+  las 4 devolvieron `88939d13...` — el MISMO contenido erróneo, de forma
+  estable. Los bytes corruptos están EN EL DISPOSITIVO, no solo en memoria.
+- **Diagnóstico CORRECTO (refina el #11)**: corrupción at-rest en el NVMe
+  (WD Green SN350). SMART limpio NO descarta esto: el firmware solo cuenta los
+  errores que él mismo detecta; la corrupción silenciosa de datos no aparece.
+  Los hashes erróneos "deterministas" del daemon docker (#11, `9f90c4ff...`)
+  son compatibles con buffers que caen en una región dañada siempre igual; el
+  contenido de las imágenes quedó absuelto (podman carga el tar de web
+  verificando cada blob y pasa 10/10 el smoke).
+- **Implicación operativa**:
+  1. NINGÚN hash verificado en esta máquina es confiable, ni siquiera con una
+     doble lectura coincidente (el mismo fichero dio 2 hashes en una hora y al
+     día siguiente era estable-erróneo).
+  2. Antes de reanudar builds locales, Cachix o L4: memtest86+ nocturno
+     (≥2 loops) Y scan de lectura completo del disco (`badblocks -sv` en modo
+     solo lectura, o test long de smartctl). Si el scan encuentra sectores
+     dañados: reemplazar el NVMe.
+  3. El tar forensics (`f7jj4iv...`) está PERDIDO: rebuild en máquina sana o
+     CI (la drv es determinista; no cuesta reconstruirlo). NO borrar el path
+     corrupto hasta cerrar la recogida de evidencia.
+  4. Los otros 5 tars pasaron `nix store verify` y smoke en podman, pero se
+     re-verificarán en CI antes de publicar (prudencia, no evidencia).
